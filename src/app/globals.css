@@ -1,0 +1,403 @@
+@import "tailwindcss";
+
+/* ────────────────────────────────────────────────────────────────────
+   CivicShield AI — "Tactical Civic Command" design system
+   Base #0B0F17 · surfaces #111827/#1E293B · primary blue #3B82F6
+   Indigo/AI-violet accents · emerald/amber/red semantics
+   8px spacing rhythm · 8–20px radii · subtle borders · no neon
+   ──────────────────────────────────────────────────────────────────── */
+
+@theme inline {
+  /* ── Color: canvas & surfaces ── */
+  --color-cs-bg: #0b0f17;
+  --color-cs-surface: #111827;
+  --color-cs-elevated: #1e293b;
+
+  /* ── Color: brand accents ── */
+  --color-cs-primary: #3b82f6;
+  --color-cs-primary-hover: #60a5fa;
+  --color-cs-indigo: #4f46e5;
+  --color-cs-violet: #8b5cf6;
+
+  /* ── Color: semantic states ── */
+  --color-cs-success: #10b981;
+  --color-cs-warning: #f59e0b;
+  --color-cs-critical: #ef4444;
+
+  /* ── Color: text tiers ──
+     cs-text      primary content (#F8FAFC)
+     cs-secondary supporting text (#94A3B8)
+     cs-muted     backwards-compat alias of cs-secondary (existing pages
+                  render #94A3B8 today; they adopt tiers at their own step)
+     cs-faint     tertiary/disabled text (#64748B)                       */
+  --color-cs-text: #f8fafc;
+  --color-cs-secondary: #94a3b8;
+  --color-cs-muted: #94a3b8;
+  --color-cs-faint: #64748b;
+
+  /* ── Borders ── */
+  --color-cs-border: rgba(148, 163, 184, 0.16);
+
+  /* ── Typography (families injected by next/font in layout.tsx) ── */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+
+  /* ── Radii ── */
+  --radius-cs-sm: 8px;
+  --radius-cs-md: 12px;
+  --radius-cs-lg: 16px;
+  --radius-cs-xl: 20px;
+
+  /* ── Elevation ── */
+  --shadow-cs-card: 0 1px 0 rgba(248, 250, 252, 0.04) inset, 0 12px 32px -18px rgba(2, 6, 14, 0.9);
+  --shadow-cs-pop: 0 16px 40px -18px rgba(2, 6, 14, 0.95);
+
+  /* ── Motion ── */
+  --ease-cs-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-cs-fast: 120ms;
+  --duration-cs-base: 180ms;
+  --duration-cs-slow: 240ms;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(59, 130, 246, 0.12), transparent 60%),
+    radial-gradient(900px 420px at -10% 0%, rgba(79, 70, 229, 0.08), transparent 55%),
+    var(--color-cs-bg);
+  color: var(--color-cs-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(59, 130, 246, 0.45);
+}
+
+/* Display face for page/section headings */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* Tabular numerals for metrics, counts, timestamps, IDs */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Focus visibility for accessibility */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-cs-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── Surfaces ────────────────────────────────────────────────────── */
+.cs-card {
+  border-radius: var(--radius-cs-xl);
+  border: 1px solid var(--color-cs-border);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.6), rgba(17, 24, 39, 0.85));
+  box-shadow: var(--shadow-cs-card);
+}
+
+.cs-card-hover {
+  transition: border-color var(--duration-cs-base) var(--ease-cs-out),
+    transform var(--duration-cs-base) var(--ease-cs-out);
+}
+.cs-card-hover:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+  transform: translateY(-1px);
+}
+
+.cs-elevated {
+  background: var(--color-cs-elevated);
+  border: 1px solid var(--color-cs-border);
+}
+
+/* Horizontal scroll region on small screens (tables) */
+.cs-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Form controls ───────────────────────────────────────────────── */
+.cs-input {
+  width: 100%;
+  border-radius: var(--radius-cs-md);
+  border: 1px solid var(--color-cs-border);
+  background: rgba(11, 15, 23, 0.6);
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--color-cs-text);
+  transition: border-color var(--duration-cs-fast) ease, background var(--duration-cs-fast) ease,
+    box-shadow var(--duration-cs-fast) ease;
+}
+.cs-input::placeholder {
+  color: rgba(148, 163, 184, 0.6);
+}
+.cs-input:hover {
+  border-color: rgba(148, 163, 184, 0.3);
+}
+.cs-input:focus {
+  border-color: var(--color-cs-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────── */
+.cs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--radius-cs-md);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 10px 18px;
+  transition: background var(--duration-cs-fast) ease, border-color var(--duration-cs-fast) ease,
+    transform 100ms ease, box-shadow var(--duration-cs-fast) ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.cs-btn:active {
+  transform: translateY(1px);
+}
+/* Icon micro-feedback: buttons already transition color/transform; the icon
+   eases with them (transform-only — no layout cost). Disabled stays static. */
+.cs-btn svg {
+  transition: transform var(--duration-cs-fast) var(--ease-cs-out);
+}
+.cs-btn:hover:not(:disabled) svg {
+  transform: translateY(-1px);
+}
+.cs-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.cs-btn-primary {
+  background: var(--color-cs-primary);
+  color: #fff;
+  box-shadow: 0 8px 24px -10px rgba(59, 130, 246, 0.55);
+}
+.cs-btn-primary:hover:not(:disabled) {
+  background: var(--color-cs-primary-hover);
+}
+.cs-btn-secondary {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--color-cs-text);
+  border-color: var(--color-cs-border);
+}
+.cs-btn-secondary:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.14);
+  border-color: rgba(148, 163, 184, 0.3);
+}
+.cs-btn-success {
+  background: var(--color-cs-success);
+  color: #052e22;
+}
+.cs-btn-success:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.cs-btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.cs-btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* ── Badges ──────────────────────────────────────────────────────── */
+.cs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+/* ── Skeleton shimmer ────────────────────────────────────────────── */
+.cs-skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-cs-md);
+  background: rgba(148, 163, 184, 0.09);
+}
+.cs-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.14), transparent);
+  animation: cs-shimmer 1.6s infinite;
+}
+@keyframes cs-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ── Entrance animations (subtle) ────────────────────────────────── */
+@keyframes cs-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cs-fade-up {
+  animation: cs-fade-up 360ms var(--ease-cs-out) both;
+}
+
+/* Backdrop / overlay fade (modal backdrop, popovers) */
+@keyframes cs-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.cs-fade-in {
+  animation: cs-fade-in 160ms ease both;
+}
+
+/* Dialog panel entrance: opacity + small translate + scale (transform-only) */
+@keyframes cs-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.cs-pop-in {
+  animation: cs-pop-in var(--duration-cs-slow) var(--ease-cs-out) both;
+}
+
+/* Chart bar entrance: scaleY from baseline (transform-only, no layout cost) */
+@keyframes cs-grow-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.cs-bar-in {
+  transform-origin: bottom;
+  animation: cs-grow-y 320ms var(--ease-cs-out) both;
+}
+
+/* Refresh/loading icon cue — class applied only while a request is in flight. */
+@keyframes cs-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.cs-spin-loading {
+  animation: cs-rotate 0.9s linear infinite;
+}
+
+@keyframes cs-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+  }
+}
+.cs-pulse-dot {
+  animation: cs-pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes cs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Leaflet dark treatment ──────────────────────────────────────── */
+.leaflet-container {
+  background: #0b0f17;
+  font-family: inherit;
+}
+.leaflet-tile-pane {
+  filter: brightness(0.72) contrast(1.06) saturate(0.7) hue-rotate(190deg) invert(0.92);
+}
+.leaflet-control-zoom a {
+  background: var(--color-cs-elevated) !important;
+  color: var(--color-cs-text) !important;
+  border-color: var(--color-cs-border) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: #243349 !important;
+}
+.leaflet-control-attribution {
+  background: rgba(11, 15, 23, 0.8) !important;
+  color: var(--color-cs-muted) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a {
+  color: #7da2d9 !important;
+}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: var(--color-cs-elevated);
+  color: var(--color-cs-text);
+  border: 1px solid var(--color-cs-border);
+  box-shadow: var(--shadow-cs-pop);
+}
+.leaflet-popup-content {
+  margin: 12px 16px;
+}
+.leaflet-popup-close-button {
+  color: var(--color-cs-muted) !important;
+}
+
+/* Map marker hover */
+.cs-marker {
+  transition: transform 140ms ease;
+}
+.cs-marker:hover {
+  transform: scale(1.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-fade-up,
+  .cs-pulse-dot,
+  .cs-skeleton::after {
+    animation: none;
+  }
+  /* Also neutralize inline animations (e.g. cs-spin) and transitions. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

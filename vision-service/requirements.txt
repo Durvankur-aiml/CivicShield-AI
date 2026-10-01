@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pillow>=10.0
+ultralytics>=8.2
+
+# Verified on this machine (2026-09-20): Python 3.14.2 installs and imports
+# ultralytics 8.4.156 with torch 2.14.0+cpu. Python 3.11–3.13 also work.
+# If pip cannot find a torch wheel for your Python, use Python 3.12.

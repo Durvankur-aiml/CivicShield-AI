@@ -1,0 +1,365 @@
+// CivicShield AI — original schema designed for this project.
+// Canonical strategy (Phase 1): PostgreSQL everywhere — a local Postgres for
+// development and Supabase Postgres for deployment (same schema, no model
+// changes). DIRECT_URL optionally points at a direct (non-pooled) connection
+// for CLI/schema operations when DATABASE_URL is pooled.
+// Enum-like fields are validated strings enforced by zod schemas in
+// src/lib/constants.ts (kept provider-portable).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // Optional pooled-connection support (e.g. Supabase transaction pooler):
+  // when DATABASE_URL is pooled, uncomment the next line and set DIRECT_URL
+  // to the direct (non-pooled) connection so CLI/schema operations use it.
+  // When commented out, Prisma uses DATABASE_URL for everything — this is
+  // the default so a fresh setup needs exactly ONE database variable.
+  // directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String      @id @default(cuid())
+  email        String      @unique
+  // Identity is Google/Firebase-first: verified firebaseUid is the external
+  // identity reference. passwordHash is nullable only so the previously seeded
+  // demo staff rows keep working; NO password login path exists in the app.
+  passwordHash String?
+  firebaseUid  String?     @unique
+  image        String?
+  name         String
+  phone        String?
+  role         String      @default("CITIZEN") // CITIZEN | WORKER | OFFICIAL (server-assigned via staff allowlist or verified worker approval; no signup role selection)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  karma        Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @default(now()) @updatedAt
+
+  complaints         Complaint[]        @relation("Reporter")
+  assignedComplaints Complaint[]        @relation("AssignedWorker")
+  workerProfile      WorkerProfile?
+  workerApplications WorkerApplication[]
+  assignments        Assignment[]       @relation("Assignments")
+  notifications      Notification[]     @relation("Notifications")
+}
+
+/// Verified operational worker record (Phase 2A). Created ONLY through the
+/// official approval transaction — never directly. One per user.
+/// Carries the structured, queryable capability data that Phase 2B/2C will
+/// use for automatic worker assignment (department, skills, equipment,
+/// availability, service area). Employee ID is the worker's primary identity
+/// attribute (verified by the approving official, unique in the domain).
+model WorkerProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeId  String   @unique // human-assigned staff/employee number — primary worker identity
+  departmentId String
+  department  Department @relation("WorkerProfileDepartment", fields: [departmentId], references: [id])
+
+  designation String? // e.g. "Road Repair Crew Lead"
+  skills      String[] // queried/filterable for assignment (Phase 2B/2C)
+  equipment   String[] // certifications/equipment the worker can operate
+  availability String  @default("AVAILABLE") // AVAILABLE | OFF_DUTY | SUSPENDED
+  serviceAreas String[] // ward names / locality labels this worker covers
+  baseLat     Float?   // last known / depot location for future distance scoring
+  baseLng     Float?
+  maxActiveAssignments Int @default(3) // future workload guard (Phase 2B)
+
+  phone       String?  // contact captured at application/approval time
+  workEmail   String?  // optional official contact (NOT an identity proof)
+
+  approvedById String  // official who performed the verification
+  approvedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@index([departmentId])
+  @@index([availability])
+}
+
+/// Worker onboarding application (Phase 2A). A citizen must apply and be
+/// verified by an official before gaining WORKER privileges. Lifecycle:
+/// PENDING → APPROVED (creates WorkerProfile + role transition, transactional)
+/// or PENDING → REJECTED (with reason; no privileges).
+model WorkerApplication {
+  id          String   @id @default(cuid())
+  applicantId String
+  applicant   User     @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+
+  // Snapshot of stated identity at submission time (the session provides the
+  // name; the application records what the applicant declared for review).
+  employeeId  String // desired/assigned staff number — uniqueness enforced below
+  departmentId String
+  department  Department @relation("WorkerApplicationDepartment", fields: [departmentId], references: [id])
+  designation String?
+  skills      String[]
+  equipment   String[]
+  experience  String? // free-text years/background summary for the reviewer
+  serviceAreas String[]
+  phone       String?
+  workEmail   String?
+
+  status      String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  reviewedById String? // official who decided
+  reviewedAt  DateTime?
+  rejectionReason String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  // Identity integrity: one live application per employee ID, and one live
+  // application per applicant. Includes PENDING + APPROVED; a REJECTED
+  // application frees the ID for a corrected resubmission.
+  @@unique([employeeId, status])
+  @@unique([applicantId, status])
+  @@index([status, createdAt])
+  @@index([departmentId])
+}
+
+model StoredFile {
+  id        String   @id @default(cuid())
+  key       String   @unique // report/2026-09-21/<uuid>.jpg — matches storage abstraction
+  mime      String
+  bytes     Bytes
+  size      Int
+  createdAt DateTime @default(now())
+
+  @@index([key])
+}
+
+model Department {
+  id      String  @id @default(cuid())
+  name    String  @unique
+  code    String  @unique // PWD | SWM | ELECT | WATER | HEALTH | GEN
+  slaNote String?
+
+  complaints Complaint[] @relation("DepartmentComplaints")
+  workers    User[]
+  workerProfiles      WorkerProfile[]     @relation("WorkerProfileDepartment")
+  workerApplications  WorkerApplication[] @relation("WorkerApplicationDepartment")
+}
+
+model Complaint {
+  id      String @id @default(cuid())
+  refCode String @unique // CS-2026-000123
+
+  title       String
+  description String
+  category    String // POTHOLE | GARBAGE | WATERLOGGING | STREETLIGHT | ROAD_DAMAGE | WASTE_OVERFLOW | OTHER
+  severity    String // LOW | MEDIUM | HIGH | CRITICAL
+  priority    Int // 1..100
+
+  status String @default("RECEIVED") // RECEIVED | ASSIGNED | IN_PROGRESS | VERIFICATION | RESOLVED | REOPENED | ESCALATED | CLOSED
+  source String @default("CITIZEN") // CITIZEN | DEMO (demo seed data is always marked)
+
+  // Phase 4: coordinates are the AUTHORITATIVE location; address is descriptive
+  // metadata only. Nullable so a report can exist before a fix (or a manual
+  // coordinate entry) — downstream consumers must tolerate null coordinates.
+  lat     Float?
+  lng     Float?
+  address String?
+  ward    String?
+
+  // Phase 4 geospatial reliability: honest GPS capture metadata.
+  accuracyMeters     Float?    // browser-reported positional accuracy (never fabricated)
+  locationSource     String?   // GPS | MANUAL | MAP_PIN | UNKNOWN (src/lib/constants.ts LOCATION_SOURCES)
+  locationCapturedAt DateTime? // when the location reading was obtained (staleness)
+
+  language     String  @default("en") // en | hi | mr
+  transcript   String? // voice-to-text transcript if submitted by voice
+  originalText String? // raw citizen text before LLM cleanup
+
+  photoKey      String?
+  resolutionKey String?
+
+  aiConfidence Float?
+  aiSummary    String? // LLM-written concise situation summary
+
+  departmentId String?
+  department   Department? @relation("DepartmentComplaints", fields: [departmentId], references: [id])
+  reporterId   String
+  reporter     User        @relation("Reporter", fields: [reporterId], references: [id])
+  assignedToId String?
+  assignedTo   User?       @relation("AssignedWorker", fields: [assignedToId], references: [id])
+
+  // SLA
+  slaHours  Int?
+  slaDueAt  DateTime?
+  isOverdue Boolean   @default(false)
+
+  // resolution verification
+  verified               Boolean?
+  verificationConfidence Float?
+  verificationReason     String?
+  verificationProvider   String? // which AI provider produced the verdict (transparency)
+  verifiedAt             DateTime?
+  // Phase 4: explicit outcome beyond the boolean — VERIFIED | FAILED |
+  // INCONCLUSIVE | UNAVAILABLE (null = never verified). Fail-safe: anything
+  // that is not VERIFIED can never auto-approve a repair.
+  verificationResult String?
+
+  escalationCount Int @default(0)
+  reopenedCount   Int @default(0)
+
+  // duplicate intelligence
+  duplicateOfId String?
+  duplicateOf   Complaint?  @relation("DuplicateOf", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates    Complaint[] @relation("DuplicateOf")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  assignedAt  DateTime?
+  startedAt   DateTime?
+  submittedAt DateTime?
+  resolvedAt  DateTime?
+  closedAt    DateTime?
+
+  events          TimelineEvent[]
+  agentActivities AgentActivity[]
+  escalations     Escalation[]
+  assignments     Assignment[]
+  notifications   Notification[] @relation("Notifications")
+  activeAssignmentId String? @unique // currently-open assignment (history stays in Assignment[])
+  activeAssignment   Assignment? @relation("ActiveAssignment", fields: [activeAssignmentId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([category])
+  @@index([departmentId])
+  @@index([assignedToId])
+  @@index([lat, lng])
+  // Phase 5 analytics: every analytics metric filters by the createdAt window
+  // (volume/resolution/verification/location/time-series). One index serves
+  // them all; verified-at/resolvedAt filters run inside already-bounded
+  // created-in-window scans.
+  @@index([createdAt])
+}
+
+model TimelineEvent {
+  id          String    @id @default(cuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  type        String // CREATED | STATUS | ASSIGNMENT | VERIFICATION | ESCALATION | SLA | EVIDENCE
+  actor       String    @default("system") // system | citizen | worker | official | agent:<name>
+  title       String
+  detail      String?
+  createdAt   DateTime  @default(now())
+
+  @@index([complaintId])
+}
+
+model AgentActivity {
+  id          String     @id @default(cuid())
+  complaintId String?
+  complaint   Complaint? @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  runId       String? // groups one orchestrated run
+  agent       String // VisionAgent | TriageAgent | DuplicateAgent | RoutingAgent | DispatchAgent | VerificationAgent | SLAAgent
+  action      String // tool name executed, e.g. analyze_image
+  summary     String // one-line human-readable decision
+  detail      String? // compact structured context (JSON string)
+  createdAt   DateTime   @default(now())
+
+  @@index([complaintId])
+  @@index([runId])
+  // Phase 5 analytics: no-eligible-worker metrics query agent+action (the
+  // engine's audit trail is the source of truth for that outcome).
+  @@index([agent, action])
+}
+
+model Escalation {
+  id          String    @id @default(cuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  level       Int       @default(1)
+  reason      String
+  createdAt   DateTime  @default(now())
+
+  @@index([complaintId])
+}
+
+/// Assignment lifecycle record (Phase 2B). Every automatic or manual
+/// assignment decision creates an Assignment row — history is NEVER
+/// overwritten: reassignment/override closes the previous row (REJECTED /
+/// CANCELLED / REASSIGNED) and creates a new one. Complaint.activeAssignmentId
+/// points at the single open assignment.
+model Assignment {
+  id          String    @id @default(cuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+
+  workerId    String // User.id of the assigned worker
+  worker      User      @relation("Assignments", fields: [workerId], references: [id])
+  activeForComplaint Complaint? @relation("ActiveAssignment")
+
+  // Reassignment chain (Phase 3): canonical link to the assignment this row
+  // replaces (after a rejection or an official override). History rows are
+  // never overwritten — the chain makes the A → B relationship explicit.
+  previousAssignmentId String?
+  previousAssignment   Assignment?  @relation("Reassignments", fields: [previousAssignmentId], references: [id], onDelete: SetNull)
+  reassignments        Assignment[] @relation("Reassignments")
+
+  // Per-assignment SLA markers (Phase 3). Exist ONLY for idempotency —
+  // warning/breach fire exactly once per assignment; the operational SLA
+  // STATE itself is always derived from authoritative timestamps (see
+  // deriveSlaState in src/lib/slaDomain.ts).
+  slaWarnedAt   DateTime?
+  slaBreachedAt DateTime?
+
+  notifications Notification[] @relation("Notifications")
+
+  status      String    @default("OFFERED") // OFFERED | ACCEPTED | IN_PROGRESS | COMPLETED | REJECTED | CANCELLED | REASSIGNED
+  mode        String    @default("AUTO") // AUTO (engine decision) | MANUAL (official pick) | OVERRIDE (official replaces engine pick)
+  policyVersion String  // engine policy version that produced this decision ("manual" for non-auto)
+
+  // Structured, explainable decision (JSON string):
+  // { selected: {employeeId, score, breakdown[]}, candidates: [{employeeId, score, eligible}],
+  //   ineligible: [{employeeId, reasons[]}], requirements, noEligibleWorker? }
+  decision    String?
+  reason      String? // human-readable one-liner (override reason, rejection trigger, …)
+
+  // Lifecycle timestamps (OFFERED set by createdAt)
+  respondedAt DateTime? // accepted/rejected
+  startedAt   DateTime?
+  completedAt DateTime?
+  closedAt    DateTime? // cancelled/reassigned
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([complaintId])
+  @@index([workerId, status])
+  @@index([status])
+  // Phase 5 analytics: assignment windows filter by createdAt (and compose
+  // with the existing status index for status+window counts).
+  @@index([createdAt])
+}
+
+/// In-app notification (Phase 3). Created only from real domain events
+/// (assignment offered/accepted/rejected/reassigned/started/completed,
+/// SLA warning/breach, escalation, official override) — never from route
+/// calls alone. dedupeKey is a deterministic event key with a database
+/// UNIQUE constraint: repeated sweeps/retries cannot create duplicates.
+model Notification {
+  id           String      @id @default(cuid())
+  recipientId  String
+  recipient    User        @relation("Notifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  type         String      // ASSIGNMENT_OFFERED | ASSIGNMENT_ACCEPTED | ASSIGNMENT_REJECTED | ASSIGNMENT_REASSIGNED | ASSIGNMENT_STARTED | ASSIGNMENT_COMPLETED | SLA_WARNING | SLA_BREACH | ESCALATION | OFFICIAL_OVERRIDE | SYSTEM
+  title        String
+  body         String?
+  complaintId  String?
+  complaint    Complaint?  @relation("Notifications", fields: [complaintId], references: [id], onDelete: Cascade)
+  assignmentId String?
+  assignment   Assignment? @relation("Notifications", fields: [assignmentId], references: [id], onDelete: SetNull)
+
+  dedupeKey    String?     @unique // deterministic event key — repeat events do NOT duplicate (null = always create)
+  data         String?     // optional structured metadata (JSON string, repo convention)
+  readAt       DateTime?
+  createdAt    DateTime    @default(now())
+
+  @@index([recipientId, readAt])
+  @@index([complaintId])
+}
