@@ -57,3 +57,4 @@ next-env.d.ts
 # local env overrides (env* rule above covers most; explicit for clarity)
 .env*.local
 .freebuff/
+secrets/
