@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { Card, Skeleton, ErrorNote, StatusBadge, SeverityBadge, Spinner } from "@/components/ui";
-import { api, fetchMe, type SessionUser } from "@/lib/client";
+import { api, fetchMe, homeForRole, type SessionUser } from "@/lib/client";
 
 type Detail = {
   id: string; refCode: string; title: string; description: string; category: string; severity: string;
@@ -32,7 +32,7 @@ export default function ResolvePage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     fetchMe().then((u) => {
       if (!u) { setMe(null); return; }
-      if (u.role !== "WORKER" && u.role !== "OFFICIAL") { router.push("/citizen"); return; }
+      if (u.role !== "WORKER" && u.role !== "OFFICIAL") { router.push(homeForRole(u.role)); return; }
       setMe(u);
       api<{ complaint: Detail }>(`/api/complaints/${id}`).then((d) => setC(d.complaint)).catch((e) => setError((e as Error).message));
     });

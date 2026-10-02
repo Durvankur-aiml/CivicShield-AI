@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { Card, MetricCard, Skeleton, LoginPrompt, ErrorNote, SectionHeading, Button, Select } from "@/components/ui";
-import { api, fetchMe, fmtDateTime, type SessionUser } from "@/lib/client";
+import { api, fetchMe, fmtDateTime, homeForRole, type SessionUser } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
 import {
   ArrowLeft,
@@ -138,7 +138,7 @@ export default function AnalyticsPage() {
   useEffect(() => {
     fetchMe().then((u) => {
       if (!u) { setMe(null); return; }
-      if (u.role !== "OFFICIAL") { window.location.href = u.role === "WORKER" ? "/worker" : "/citizen"; return; }
+      if (u.role !== "OFFICIAL") { window.location.href = homeForRole(u.role); return; }
       setMe(u);
       load("30d");
     });

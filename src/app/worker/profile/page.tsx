@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Card, EmptyState, ErrorNote, LoginPrompt, PageHeader, Skeleton } from "@/components/ui";
-import { api, fetchMe, fmtDateTime, type SessionUser } from "@/lib/client";
+import { api, fetchMe, fmtDateTime, homeForRole, type SessionUser } from "@/lib/client";
 import { UserRoundX } from "lucide-react";
 import { useLang } from "@/lib/i18n";
 import { workerAvailabilityLabels, workerEquipmentLabels, workerSkillLabels } from "@/lib/constants";
@@ -50,7 +50,7 @@ export default function WorkerProfilePage() {
         return;
       }
       if (u.role !== "WORKER") {
-        window.location.href = u.role === "OFFICIAL" ? "/official" : "/citizen";
+        window.location.href = homeForRole(u.role);
         return;
       }
       setMe(u);

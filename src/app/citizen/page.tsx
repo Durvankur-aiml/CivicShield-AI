@@ -18,7 +18,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import MapPanel from "@/components/MapPanel";
-import { api, fetchMe, fmtAgo, fmtCountdown } from "@/lib/client";
+import { api, fetchMe, fmtAgo, fmtCountdown, homeForRole } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
 import {
   Bell,
@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 
 type Row = {
-  id: string; refCode: string; title: string; category: string; severity: string; status: string;
+  id: string; refCode: string; reporterId: string; title: string; category: string; severity: string; status: string;
   createdAt: string; slaDueAt: string | null; isOverdue: boolean; source: string;
   priority?: number; escalationCount?: number;
   lat: number | null; lng: number | null;
@@ -82,16 +82,31 @@ export default function CitizenHomePage() {
   const [notifications, setNotifications] = useState<Notification[] | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [markingRead, setMarkingRead] = useState(false);
+  const [notice, setNotice] = useState(""); // one-shot success notice after a deletion
   const loadOnce = useRef(false);
   const { t } = useLang();
 
   useEffect(() => {
     if (loadOnce.current) return;
     loadOnce.current = true;
+    // One-shot success notice handed over by the detail page after deletion.
+    // Read outside the synchronous effect body (queueMicrotask, as IntroSplash
+    // does) so the banner state never triggers a cascading render on mount.
+    queueMicrotask(() => {
+      try {
+        const deletedRef = sessionStorage.getItem("cs_report_deleted");
+        if (deletedRef) {
+          setNotice(deletedRef);
+          sessionStorage.removeItem("cs_report_deleted");
+        }
+      } catch {
+        // Storage unavailable — the notice is cosmetic, never blocking.
+      }
+    });
     fetchMe().then((u) => {
       if (!u) { setMe(null); return; }
       if (u.role !== "CITIZEN") {
-        window.location.href = u.role === "WORKER" ? "/worker" : "/official";
+        window.location.href = homeForRole(u.role);
         return;
       }
       api<{ complaints: Row[] }>("/api/complaints?scope=mine")
@@ -181,6 +196,11 @@ export default function CitizenHomePage() {
 
   return (
     <AppShell>
+      {notice && (
+        <p role="status" className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-200">
+          {t("reportDeleted")} <span className="font-mono font-semibold">{notice}</span>
+        </p>
+      )}
       <div className="mx-auto max-w-7xl space-y-6">
         {/* ── Welcome / hero ─────────────────────────────────────────── */}
         <section className="cs-card cs-fade-up relative overflow-hidden p-5 sm:p-7">

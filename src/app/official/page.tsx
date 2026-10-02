@@ -21,10 +21,10 @@ import {
 } from "@/components/ui";
 import { AgentActivityPanel, type Activity } from "@/components/AgentActivityPanel";
 import MapPanel from "@/components/MapPanel";
-import { api, fetchMe, fmtAgo, fmtCountdown, type SessionUser } from "@/lib/client";
+import { api, fetchMe, fmtAgo, fmtCountdown, homeForRole, type SessionUser } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
 import { severityTone } from "@/components/ui";
-import { CATEGORIES, STATUSES, DEPARTMENT_CODES, categoryLabels, statusLabels, severityLabels } from "@/lib/constants";
+import { CATEGORIES, STATUSES, DEPARTMENT_CODES, categoryLabels, statusLabels, severityLabels, departmentLabel } from "@/lib/constants";
 import { CheckCheck, Clock, Flame, Map as MapIcon, RefreshCw, Search, ShieldCheck, Timer, Users } from "lucide-react";
 
 type Row = {
@@ -87,7 +87,7 @@ export default function OfficialDashboard() {
   useEffect(() => {
     fetchMe().then((u) => {
       if (!u) { setMe(null); return; }
-      if (u.role !== "OFFICIAL") { window.location.href = u.role === "WORKER" ? "/worker" : "/citizen"; return; }
+      if (u.role !== "OFFICIAL") { window.location.href = homeForRole(u.role); return; }
       setMe(u);
       load();
       fetch("/api/health/ai").then((r) => r.json()).then((d) => setDemoMode(Boolean(d.demoMode))).catch(() => {});
@@ -384,7 +384,7 @@ export default function OfficialDashboard() {
               label={t("department")}
               value={filters.department}
               onChange={(e) => setFilters((f) => ({ ...f, department: e.target.value }))}
-              options={[{ value: "", label: t("filterAll") }, ...DEPARTMENT_CODES.map((d) => ({ value: d, label: d }))]}
+              options={[{ value: "", label: t("filterAll") }, ...DEPARTMENT_CODES.map((d) => ({ value: d, label: departmentLabel(d) }))]}
               className="w-full sm:w-auto"
             />
           </Card>

@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Button, ErrorNote, Input, LoginPrompt, PageHeader, Select, Skeleton } from "@/components/ui";
-import { api, fetchMe, fmtDateTime, type SessionUser } from "@/lib/client";
+import { api, fetchMe, fmtDateTime, homeForRole, type SessionUser } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
-import { DEPARTMENT_CODES, EMPLOYEE_ID_REGEX, workerEquipmentLabels, workerSkillLabels } from "@/lib/constants";
+import { DEPARTMENT_CODES, EMPLOYEE_ID_REGEX, departmentLabel, workerEquipmentLabels, workerSkillLabels } from "@/lib/constants";
 
 /** PublicWorkerApplication — verified in src/lib/workerDomain.ts (JSON dates are strings). */
 type AppRow = {
@@ -47,12 +47,12 @@ function ApplicationCard({ a }: { a: AppRow }) {
       </div>
       <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
         <div>
-          <dt className="text-xs text-cs-secondary">{t("employeeId")}</dt>
+          <dt className="text-xs text-cs-secondary">{t("municipalEmployeeId")}</dt>
           <dd className="font-mono text-cs-text">{a.employeeId}</dd>
         </div>
         <div>
           <dt className="text-xs text-cs-secondary">{t("department")}</dt>
-          <dd className="text-cs-text">{a.departmentCode || "—"}</dd>
+          <dd className="text-cs-text">{a.departmentCode ? departmentLabel(a.departmentCode) : "—"}</dd>
         </div>
         {a.designation && (
           <div>
@@ -191,7 +191,7 @@ export default function WorkerApplyPage() {
         return;
       }
       if (u.role !== "CITIZEN") {
-        window.location.href = u.role === "WORKER" ? "/worker" : "/official";
+        window.location.href = homeForRole(u.role);
         return;
       }
       setMe(u);
@@ -270,6 +270,10 @@ export default function WorkerApplyPage() {
       <div className="mx-auto max-w-3xl space-y-4">
         <PageHeader title={t("applyTitle")} subtitle={t("applySub")} />
 
+        <p className="rounded-xl border border-blue-400/25 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
+          {t("workerIdNote")}
+        </p>
+
         {existing === undefined ? (
           <Skeleton className="h-40" />
         ) : (
@@ -295,7 +299,7 @@ export default function WorkerApplyPage() {
                 <form onSubmit={submit} className="cs-card cs-fade-up space-y-4 p-5">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Input
-                      label={t("employeeId")}
+                      label={t("municipalEmployeeId")}
                       hint={t("employeeIdHint")}
                       value={employeeId}
                       onChange={(e) => setEmployeeId(e.target.value)}
@@ -308,7 +312,7 @@ export default function WorkerApplyPage() {
                       value={departmentCode}
                       onChange={(e) => setDepartmentCode(e.target.value)}
                       required
-                      options={[{ value: "", label: "—" }, ...DEPARTMENT_CODES.map((c) => ({ value: c, label: c }))]}
+                      options={[{ value: "", label: "—" }, ...DEPARTMENT_CODES.map((c) => ({ value: c, label: departmentLabel(c) }))]}
                     />
                   </div>
                   <div className="grid gap-4 sm:grid-cols-3">

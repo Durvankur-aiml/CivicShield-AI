@@ -23,6 +23,7 @@ export type PrismaMock = {
     findMany: MockFn;
     create: MockFn;
     update: MockFn;
+    deleteMany: MockFn; // citizen delete-before-assignment (B4)
     count: MockFn;
     groupBy: MockFn; // Phase 5 analytics (status/category/department groupings)
   };
@@ -49,6 +50,19 @@ export type PrismaMock = {
     create: MockFn;
     upsert: MockFn;
   };
+  officialApplication: {
+    findFirst: MockFn;
+    findUnique: MockFn;
+    findMany: MockFn;
+    create: MockFn;
+    update: MockFn;
+  };
+  officialProfile: {
+    findUnique: MockFn;
+    findMany: MockFn;
+    create: MockFn;
+    aggregate: MockFn;
+  };
   agentActivity: {
     create: MockFn;
     findMany: MockFn;
@@ -74,7 +88,7 @@ export type PrismaMock = {
     updateMany: MockFn;
     count: MockFn;
   };
-  storedFile: { findUnique: MockFn; create: MockFn };
+  storedFile: { findUnique: MockFn; create: MockFn; deleteMany: MockFn };
   $transaction: MockFn;
 };
 
@@ -86,6 +100,7 @@ export function makePrismaMock(): PrismaMock {
       findMany: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      deleteMany: vi.fn(),
       count: vi.fn(),
       groupBy: vi.fn(),
     },
@@ -112,6 +127,19 @@ export function makePrismaMock(): PrismaMock {
       create: vi.fn(),
       upsert: vi.fn(),
     },
+    officialApplication: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    officialProfile: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      aggregate: vi.fn(),
+    },
     agentActivity: {
       create: vi.fn(),
       findMany: vi.fn(),
@@ -137,7 +165,7 @@ export function makePrismaMock(): PrismaMock {
       updateMany: vi.fn(),
       count: vi.fn(),
     },
-    storedFile: { findUnique: vi.fn(), create: vi.fn() },
+    storedFile: { findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
     $transaction: vi.fn(),
   } as PrismaMock;
 

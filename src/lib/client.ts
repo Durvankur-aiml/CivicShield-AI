@@ -21,7 +21,12 @@ export async function api<T = unknown>(
   return data;
 }
 
-export type SessionUser = { id: string; name: string; email: string; role: "CITIZEN" | "WORKER" | "OFFICIAL" };
+export type SessionUser = { id: string; name: string; email: string; role: "CITIZEN" | "WORKER" | "OFFICIAL" | "ADMIN" };
+
+/** Server-verified role → dashboard route. Never derived from client state. */
+export function homeForRole(role: SessionUser["role"]): string {
+  return role === "WORKER" ? "/worker" : role === "OFFICIAL" ? "/official" : role === "ADMIN" ? "/admin" : "/citizen";
+}
 export async function fetchMe(): Promise<SessionUser | null> {
   try {
     const { user } = await api<{ user: SessionUser }>("/api/auth/me");

@@ -6,6 +6,7 @@ import {
   checkEligibility,
   scoreCandidate,
   rankCandidates,
+  hasUsableCoordinates,
   type ComplaintRequirements,
 } from "@/lib/assignmentDomain";
 import type { WorkerProfile, Complaint } from "@prisma/client";
@@ -231,5 +232,39 @@ describe("deterministic tie-breaking", () => {
     const noLoc = scoreCandidate(profile({ employeeId: "A", baseLat: null, baseLng: null }), requirements(), 0, complaint());
     expect(rankCandidates(near, noLoc)).toBeLessThan(0); // near first
     expect(rankCandidates(noLoc, near)).toBeGreaterThan(0);
+  });
+});
+
+describe("coordinate usability (objective 3 hardening)", () => {
+  it("recognizes valid coordinate pairs", () => {
+    expect(hasUsableCoordinates(16.6952, 74.4574)).toBe(true);
+    expect(hasUsableCoordinates(-90, 180)).toBe(true);
+    expect(hasUsableCoordinates(0, 0)).toBe(true);
+  });
+
+  it("rejects missing, non-finite, and out-of-range coordinates", () => {
+    expect(hasUsableCoordinates(null, null)).toBe(false);
+    expect(hasUsableCoordinates(undefined, undefined)).toBe(false);
+    expect(hasUsableCoordinates(Number.NaN, 74)).toBe(false);
+    expect(hasUsableCoordinates(16, Number.POSITIVE_INFINITY)).toBe(false);
+    expect(hasUsableCoordinates(91, 74)).toBe(false); // lat out of range
+    expect(hasUsableCoordinates(16, 181)).toBe(false); // lng out of range
+  });
+
+  it("invalid complaint coordinates fall back to the neutral distance instead of poisoning the score", () => {
+    // A NaN coordinate would make Haversine return NaN, which would make the
+    // whole score NaN and break deterministic ranking. The guard keeps the
+    // documented neutral-0.5 fallback instead.
+    const poisoned = scoreCandidate(
+      profile({ baseLat: 16.6952, baseLng: 74.4574 }),
+      requirements(),
+      0,
+      complaint({ lat: Number.NaN, lng: Number.NaN })
+    );
+    expect(poisoned.distanceM).toBeNull();
+    expect(Number.isFinite(poisoned.score)).toBe(true);
+    const distanceFactor = poisoned.breakdown.find((b) => b.factor === "distance");
+    expect(distanceFactor?.points).toBeCloseTo(SCORE_WEIGHTS.distance * 0.5, 2);
+    expect(distanceFactor?.note).toContain("neutral");
   });
 });

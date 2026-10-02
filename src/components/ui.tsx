@@ -260,6 +260,27 @@ type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & {
   options?: (SelectOption | string)[];
 };
 
+type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  label?: string;
+  hint?: string;
+};
+
+/** Textarea on the cs-input system with optional accessible label/hint. */
+export function Textarea({ label, hint, className = "", id, ...rest }: TextareaProps) {
+  const inputId = id ?? (label ? `field-${slug(label)}` : undefined);
+  return (
+    <div className="w-full">
+      {label && (
+        <label htmlFor={inputId} className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.06em] text-cs-secondary">
+          {label}
+        </label>
+      )}
+      <textarea id={inputId} className={`cs-input ${className}`} {...rest} />
+      {hint && <p className="mt-1 text-xs text-cs-faint">{hint}</p>}
+    </div>
+  );
+}
+
 /** Select on the cs-input system with a consistent chevron affordance. */
 export function Select({ label, options, className = "", id, children, ...rest }: SelectProps) {
   const selectId = id ?? (label ? `field-${slug(label)}` : undefined);

@@ -15,7 +15,7 @@ import {
   TableShell,
   TableStateRow,
 } from "@/components/ui";
-import { api, fetchMe, fmtDateTime, type SessionUser } from "@/lib/client";
+import { api, fetchMe, fmtDateTime, homeForRole, type SessionUser } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
 import { workerAvailabilityLabels, workerEquipmentLabels, workerSkillLabels } from "@/lib/constants";
 import { BadgeCheck, Ban, Check, ClipboardList, RefreshCw } from "lucide-react";
@@ -92,7 +92,7 @@ export default function OfficialWorkersPage() {
         return;
       }
       if (u.role !== "OFFICIAL") {
-        window.location.href = u.role === "WORKER" ? "/worker" : "/citizen";
+        window.location.href = homeForRole(u.role);
         return;
       }
       setMe(u);

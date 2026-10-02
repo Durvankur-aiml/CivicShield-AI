@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /** All enum-like values in one place — validated strings, kept provider-portable. */
 
-export const ROLES = ["CITIZEN", "WORKER", "OFFICIAL"] as const;
+export const ROLES = ["CITIZEN", "WORKER", "OFFICIAL", "ADMIN"] as const;
 export const CATEGORIES = [
   "POTHOLE",
   "GARBAGE",
@@ -24,6 +24,28 @@ export const STATUSES = [
   "CLOSED",
 ] as const;
 export const DEPARTMENT_CODES = ["PWD", "SWM", "ELECT", "WATER", "HEALTH", "GEN"] as const;
+
+/**
+ * SINGLE source of truth for department code → human-readable label.
+ * Labels mirror the canonical Department rows in prisma/seed.ts so dropdowns,
+ * status cards, and review tables use the same terminology as profile cards
+ * (which render the DB's departmentName). Keys are compile-time-checked
+ * against DEPARTMENT_CODES; a test pins exact parity with the seed.
+ * Never derive labels from client input — look up by stored code only.
+ */
+export const departmentLabels: Record<(typeof DEPARTMENT_CODES)[number], string> = {
+  PWD: "Public Works Department",
+  SWM: "Solid Waste Management",
+  ELECT: "Electricity Department",
+  WATER: "Water & Sewerage Department",
+  HEALTH: "Public Health Department",
+  GEN: "General Municipal Department",
+};
+
+/** Human label for a stored department code; unknown codes render as-is. */
+export function departmentLabel(code: string): string {
+  return departmentLabels[code as (typeof DEPARTMENT_CODES)[number]] ?? code;
+}
 export const LANGUAGES = ["en", "hi", "mr"] as const;
 
 // ── Geospatial reliability (Phase 4) ───────────────────────────────────
@@ -166,6 +188,13 @@ export const NOTIFICATION_TYPES = [
   "ESCALATION",
   "OFFICIAL_OVERRIDE",
   "SYSTEM",
+  // Role lifecycle (worker onboarding + official onboarding)
+  "WORKER_APPLICATION_SUBMITTED",
+  "WORKER_APPLICATION_APPROVED",
+  "WORKER_APPLICATION_REJECTED",
+  "OFFICIAL_APPLICATION_SUBMITTED",
+  "OFFICIAL_APPLICATION_APPROVED",
+  "OFFICIAL_APPLICATION_REJECTED",
 ] as const;
 
 /**
@@ -278,5 +307,50 @@ export const workerApplicationReviewInput = z.object({
 
 export type WorkerApplicationInput = z.infer<typeof workerApplicationInput>;
 export type WorkerApplicationReviewInput = z.infer<typeof workerApplicationReviewInput>;
+
+// ── Official domain (admin-reviewed onboarding) ─────────────────────────
+
+/**
+ * Official application payload. The employee ID is the applicant's real-world
+ * MUNICIPAL staff identifier (same shape as the worker flow — verified by the
+ * approving admin). The CivicShield Official ID is NOT an input here or
+ * anywhere: it is generated server-side only at approval and can never be
+ * chosen, passed, or spoofed by a client.
+ */
+export const officialApplicationInput = z.object({
+  employeeId: employeeIdSchema,
+  departmentCode: z.enum(DEPARTMENT_CODES),
+  designation: z.string().trim().min(2).max(80).optional(),
+  municipality: z.string().trim().min(2, "Municipality/organization is required").max(120),
+  officialEmail: z.string().trim().email().max(120).optional(),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+?[0-9][0-9\s-]{5,17}$/, "Enter a valid phone number")
+    .optional(),
+  serviceAreas: z.array(z.string().trim().min(1).max(60)).max(10, "At most 10 service areas").default([]),
+  experience: z.string().trim().max(500).optional(),
+  applicationDetails: z.string().trim().max(1000).optional(),
+});
+
+export const officialApplicationReviewInput = z.object({
+  decision: z.enum(["APPROVE", "REJECT"]),
+  rejectionReason: z.string().trim().min(5, "Provide a rejection reason (min 5 characters)").max(300).optional(),
+});
+
+export type OfficialApplicationInput = z.infer<typeof officialApplicationInput>;
+export type OfficialApplicationReviewInput = z.infer<typeof officialApplicationReviewInput>;
+
+/**
+ * CivicShield Official ID — a PLATFORM identifier (NOT a government
+ * credential): CS-OFF-<4 digits>, e.g. CS-OFF-0001. Generated server-side at
+ * approval from the current high-water mark; the UNIQUE constraint on
+ * OfficialProfile.officialId arbitrates races. Immutable once issued.
+ */
+export const OFFICIAL_ID_PREFIX = "CS-OFF";
+export const OFFICIAL_ID_WIDTH = 4;
+export function formatOfficialId(seq: number): string {
+  return `${OFFICIAL_ID_PREFIX}-${String(seq).padStart(OFFICIAL_ID_WIDTH, "0")}`;
+}
 
 export type ComplaintInput = z.infer<typeof complaintInput>;

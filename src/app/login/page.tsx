@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api } from "@/lib/client";
+import { api, homeForRole, type SessionUser } from "@/lib/client";
 import { ErrorNote } from "@/components/ui";
 import { Logo, ShieldMark } from "@/components/Logo";
 import {
@@ -72,8 +72,9 @@ export default function LoginPage() {
     setError("");
     try {
       const idToken = await fbUser.getIdToken(true); // force refresh
-      await api<{ user: { role: string } }>("/api/auth/google", { body: { idToken } });
-      router.push("/citizen");
+      const { user } = await api<{ user: { role: string } }>("/api/auth/google", { body: { idToken } });
+      // Route by the SERVER-verified role (the only authoritative source).
+      router.push(homeForRole(user.role as SessionUser["role"]));
       router.refresh();
     } catch (err) {
       // Backend rejected the session — sign out of Firebase so no half-state.

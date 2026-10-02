@@ -9,7 +9,8 @@ import { AgentActivityPanel, type Activity } from "@/components/AgentActivityPan
 import { api, fetchMe } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
 import { CATEGORIES, categoryLabels, ACCURACY_GOOD_METERS, ACCURACY_DEGRADED_METERS } from "@/lib/constants";
-import { locationErrorCode, type LocationErrorCode } from "@/lib/location";
+import { type LocationErrorCode } from "@/lib/location";
+import { acquireBestLocation, type GpsWatcher } from "@/lib/locationAcquisition";
 
 /* ── Minimal Web Speech API types (not in TS DOM lib) ─────────────────── */
 type SpeechRecognitionLike = {
@@ -19,7 +20,7 @@ type SpeechRecognitionLike = {
   start(): void;
   stop(): void;
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onerror: ((e: unknown) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
   onend: (() => void) | null;
 };
 function getRecognition(): SpeechRecognitionLike | null {
@@ -30,11 +31,35 @@ function getRecognition(): SpeechRecognitionLike | null {
 
 const SPEECH_LOCALES: Record<string, string> = { en: "en-IN", hi: "hi-IN", mr: "mr-IN" };
 
+/** Genuine SpeechRecognition failures — retrying cannot recover these. */
+const VOICE_FATAL_ERRORS: Record<string, string> = {
+  "not-allowed": "Microphone permission was blocked. Allow microphone access in your browser and try again.",
+  "service-not-allowed": "Speech recognition is not available in this browser context. You can still type the complaint.",
+  "audio-capture": "No microphone was detected. Connect a microphone, or type the complaint.",
+  "language-not-supported": "Speech recognition does not support the selected language. You can still type the complaint.",
+};
+/** Transient speech-service failures tolerated (each session restart is a retry). */
+const VOICE_MAX_NETWORK_FAILURES = 3;
+/** Benign silence/abort cycles tolerated before stopping with honest guidance. */
+const VOICE_MAX_SILENT_SESSIONS = 8;
+
+/**
+ * Classify a SpeechRecognition error event into the dictation lifecycle's
+ * three branches. Pure function so the policy is unit-testable.
+ */
+export function classifyVoiceError(errorCode: string | undefined): "fatal" | "transient" | "benign" {
+  if (errorCode && VOICE_FATAL_ERRORS[errorCode]) return "fatal";
+  if (errorCode === "network") return "transient";
+  return "benign"; // "no-speech", "aborted", unknown — session-level, restartable
+}
 type SubmitResult = {
   complaint: { complaintId: string; refCode: string; category: string; severity: string; priority: number; departmentCode: string; duplicateOfRef?: string; agentRunId: string };
 };
 
 const STEPS = ["Describe", "Evidence", "Location", "Review", "Submitted"] as const;
+
+/** Location acquisition lifecycle shown in the UI. */
+type LocPhase = "idle" | "acquiring" | "confirmed" | "error";
 
 export default function SubmitPage() {
   const { t } = useLang();
@@ -45,16 +70,25 @@ export default function SubmitPage() {
   const [lat, setLat] = useState<number | null>(null);
   const [lng, setLng] = useState<number | null>(null);
   const [address, setAddress] = useState("");
-  const [locating, setLocating] = useState(false);
   // Phase 4 geospatial reliability: honest capture metadata. Coordinates are
   // authoritative; the address field is descriptive only. A geolocation
   // failure NEVER substitutes a default location — the report simply goes in
   // without coordinates (or the user types a landmark).
+  //
+  // Progressive accuracy acquisition: the browser's first fix is often a
+  // coarse cell/wifi reading, so the page keeps watching and retains the BEST
+  // valid reading until the accuracy target is reached or a bounded window
+  // expires (see src/lib/locationAcquisition.ts). lat/lng/accuracy/
+  // capturedAt always belong to the SAME best reading — never mixed.
+  const [locPhase, setLocPhase] = useState<LocPhase>("idle");
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [capturedAt, setCapturedAt] = useState<string | null>(null);
   const [locSource, setLocSource] = useState<"GPS" | "UNKNOWN">("UNKNOWN");
   const [locError, setLocError] = useState<{ code: LocationErrorCode; message: string } | null>(null);
+  const locWatcherRef = useRef<GpsWatcher | null>(null);
+  const locHasFixRef = useRef(false); // closure-safe "a fix is held" for settle callbacks
   const [listening, setListening] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
   const [recAvailable, setRecAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -63,6 +97,14 @@ export default function SubmitPage() {
   const [demoHint, setDemoHint] = useState("");
   const [activities, setActivities] = useState<Activity[]>([]);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
+  // Voice dictation lifecycle. Chrome's SpeechRecognition ends its sessions on
+  // its own (silence timeouts, final results, service hiccups) even with
+  // continuous = true, so track the user's intent and restart transparently.
+  const wantVoiceRef = useRef(false); // true from mic click until user stop / fatal error
+  const voiceCommittedRef = useRef(""); // transcript from sessions that already ended
+  const voiceLiveRef = useRef(""); // transcript of the session currently in flight
+  const voiceFailuresRef = useRef(0); // consecutive speech-service failures without a result
+  const voiceSilentRef = useRef(0); // consecutive sessions ending without ANY result
   const router = useRouter();
 
   useEffect(() => {
@@ -75,6 +117,27 @@ export default function SubmitPage() {
     return () => clearTimeout(t);
   }, [router]);
 
+  // Leaving the page must never leave the microphone hot: end any live
+  // dictation session when the component is actually abandoned.
+  useEffect(() => {
+    return () => {
+      wantVoiceRef.current = false;
+      try {
+        recRef.current?.stop();
+      } catch {
+        // Session already ended — nothing to stop.
+      }
+    };
+  }, []);
+
+  // Leaving the page must never leave a GPS watcher running either.
+  useEffect(() => {
+    return () => {
+      locWatcherRef.current?.clear();
+      locWatcherRef.current = null;
+    };
+  }, []);
+
   // Stepper position — derived, never stored, so it can't drift from reality.
   const step = result ? 5 : photo || description.trim().length >= 10 ? 1 : 0;
   const geoKnown = lat != null && lng != null;
@@ -84,73 +147,182 @@ export default function SubmitPage() {
     setPhotoPreview(f ? URL.createObjectURL(f) : null);
   }
 
+  /**
+   * Progressive location acquisition: watchPosition until the accuracy
+   * target is reached or the bounded window expires, retaining the best
+   * valid reading. The browser-reported coords.accuracy is the source of
+   * truth; lat/lng/accuracy always travel together as ONE reading.
+   */
   function locate() {
     if (!navigator.geolocation) {
+      setLocPhase("error");
       setLocError({ code: "GEO_UNSUPPORTED", message: "Geolocation is not available in this browser. You can type a landmark/address instead." });
       return;
     }
-    setLocating(true);
+    // A fresh hunt replaces any previous one; the previous watcher is cleared
+    // so two watches can never run concurrently.
+    locWatcherRef.current?.clear();
+    locWatcherRef.current = null;
+
+    setLocPhase("acquiring");
     setLocError(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const c = pos.coords;
-        // Guard against a device reporting garbage (Phase 4 A3): never store
-        // out-of-range or non-numeric coordinates, even from the browser.
-        if (
-          typeof c.latitude !== "number" || typeof c.longitude !== "number" ||
-          !Number.isFinite(c.latitude) || !Number.isFinite(c.longitude) ||
-          c.latitude < -90 || c.latitude > 90 || c.longitude < -180 || c.longitude > 180
-        ) {
-          setLocError({ code: "POSITION_UNAVAILABLE", message: "The device returned invalid coordinates. Please retry or type a landmark below." });
-          setLocating(false);
+    setLat(null);
+    setLng(null);
+    setAccuracy(null);
+    setCapturedAt(null);
+    setLocSource("GPS");
+    locHasFixRef.current = false;
+
+    const messages: Record<LocationErrorCode, string> = {
+      PERMISSION_DENIED: "Location permission was denied. Enable it in your browser, retry, or type a landmark below.",
+      POSITION_UNAVAILABLE: "Your position is currently unavailable. You can retry or type a landmark below.",
+      TIMEOUT: "Getting your location timed out. Try again, or type a landmark below.",
+      GEO_UNSUPPORTED: "Geolocation is not available in this browser. You can type a landmark/address instead.",
+      INVALID_COORDINATES: "The device returned invalid coordinates. Please retry or type a landmark below.",
+      UNKNOWN: "Could not get your location. You can retry or type a landmark below.",
+    };
+
+    locWatcherRef.current = acquireBestLocation({
+      onProgress: (reading) => {
+        locHasFixRef.current = true;
+        setLat(reading.lat);
+        setLng(reading.lng);
+        setAccuracy(reading.accuracyMeters);
+        setCapturedAt(reading.capturedAt.toISOString());
+        setLocSource("GPS");
+      },
+      onSettled: (outcome) => {
+        locWatcherRef.current = null;
+        if (outcome.kind === "confirmed") {
+          setLocPhase("confirmed");
           return;
         }
-        setLat(Number(c.latitude.toFixed(6)));
-        setLng(Number(c.longitude.toFixed(6)));
-        setAccuracy(c.accuracy != null && Number.isFinite(c.accuracy) && c.accuracy >= 0 ? c.accuracy : null);
-        setCapturedAt(new Date(pos.timestamp).toISOString());
-        setLocSource("GPS");
-        setLocating(false);
+        if (locHasFixRef.current) {
+          // A best reading is already held. Permission revoked mid-hunt:
+          // keep the best fix, but say why the improvement stopped. Transient
+          // failures (TIMEOUT / POSITION_UNAVAILABLE) keep the fix usable.
+          if (outcome.code === "PERMISSION_DENIED") {
+            setLocPhase("confirmed");
+            setLocError({ code: outcome.code, message: messages.PERMISSION_DENIED });
+          }
+          return;
+        }
+        // No reading at all — honest failure, no invented location.
+        setLocPhase("error");
+        setLocError({ code: outcome.code, message: messages[outcome.code] });
       },
-      (err) => {
-        // Machine-readable code + honest message. No fallback location, ever:
-        // the user can retry or continue with a manually typed landmark.
-        const code = locationErrorCode(err);
-        const messages: Record<LocationErrorCode, string> = {
-          PERMISSION_DENIED: "Location permission was denied. Enable it in your browser, retry, or type a landmark below.",
-          POSITION_UNAVAILABLE: "Your position is currently unavailable. You can retry or type a landmark below.",
-          TIMEOUT: "Getting your location timed out. Try again, or type a landmark below.",
-          GEO_UNSUPPORTED: "Geolocation is not available in this browser. You can type a landmark/address instead.",
-          INVALID_COORDINATES: "The device returned invalid coordinates. Please retry or type a landmark below.",
-          UNKNOWN: "Could not get your location. You can retry or type a landmark below.",
-        };
-        setLocError({ code, message: messages[code] });
-        setLocating(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5 * 60_000 }
-    );
+    });
+  }
+
+  /** End the current dictation session deliberately (user stop, submit, unmount). */
+  function stopVoice() {
+    wantVoiceRef.current = false;
+    try {
+      recRef.current?.stop();
+    } catch {
+      // Session already ended — nothing to stop.
+    }
+    setListening(false);
   }
 
   function toggleVoice() {
     if (listening) {
-      recRef.current?.stop();
-      setListening(false);
+      stopVoice();
       return;
     }
+    if (wantVoiceRef.current) return; // double-click guard: never two live sessions
     const rec = getRecognition();
     if (!rec) return;
+
+    // Fresh dictation. The transcript replaces the field (existing behavior)
+    // but is accumulated across the transparent session restarts below.
+    wantVoiceRef.current = true;
+    voiceCommittedRef.current = "";
+    voiceLiveRef.current = "";
+    voiceFailuresRef.current = 0;
+    voiceSilentRef.current = 0;
+    setVoiceError("");
+
     rec.lang = SPEECH_LOCALES[language] ?? "en-IN";
     rec.continuous = true;
     rec.interimResults = false;
     rec.onresult = (e) => {
       let text = "";
       for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript + " ";
-      setDescription(text.trim());
+      voiceLiveRef.current = text.trim();
+      voiceFailuresRef.current = 0;
+      voiceSilentRef.current = 0;
+      setDescription(`${voiceCommittedRef.current} ${voiceLiveRef.current}`.trim());
     };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
+    rec.onerror = (e) => {
+      const kind = classifyVoiceError(e?.error);
+      if (kind === "fatal") {
+        // Genuine error (permission denied, no microphone, unsupported
+        // language): stop for real and say why — never fail silently.
+        wantVoiceRef.current = false;
+        setListening(false);
+        setVoiceError(VOICE_FATAL_ERRORS[e?.error ?? ""]);
+        return;
+      }
+      if (kind === "transient") {
+        // The speech service is unreachable. Allow a couple of transparent
+        // restarts, then fail honestly instead of retrying forever.
+        voiceFailuresRef.current += 1;
+        if (voiceFailuresRef.current >= VOICE_MAX_NETWORK_FAILURES) {
+          wantVoiceRef.current = false;
+          setListening(false);
+          setVoiceError("The speech recognition service is unreachable. Check your connection, or type the complaint.");
+        }
+      }
+      // "no-speech" / "aborted" stay benign here, but a LONG run of sessions
+      // that end without ever producing a result means the mic is muted or
+      // the service is silently failing — onend stops after the bound above.
+    };
+    rec.onend = () => {
+      if (!wantVoiceRef.current) {
+        setListening(false);
+        return;
+      }
+      // Chrome ends recognition sessions on its own (silence timeout, final
+      // result, service hiccup) even with continuous = true. Keep dictation
+      // alive until the user actually presses Stop by starting a new session.
+      if (!voiceLiveRef.current) voiceSilentRef.current += 1;
+      if (voiceSilentRef.current >= VOICE_MAX_SILENT_SESSIONS) {
+        // Bounded honesty: several silent cycles without a single word is a
+        // muted mic / dead service, not a pause in speech — stop instead of
+        // spinning restarts forever.
+        wantVoiceRef.current = false;
+        setListening(false);
+        setVoiceError("No speech was detected. Check that your microphone is selected and not muted, then try again — or type the complaint.");
+        return;
+      }
+      voiceCommittedRef.current = `${voiceCommittedRef.current} ${voiceLiveRef.current}`.trim();
+      voiceLiveRef.current = "";
+      try {
+        rec.start();
+      } catch {
+        // The previous session may still be tearing down; retry once shortly.
+        window.setTimeout(() => {
+          if (!wantVoiceRef.current) return;
+          try {
+            rec.start();
+          } catch {
+            wantVoiceRef.current = false;
+            setListening(false);
+            setVoiceError("Voice input stopped unexpectedly. Try again, or type the complaint.");
+          }
+        }, 250);
+      }
+    };
+
     recRef.current = rec;
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      wantVoiceRef.current = false;
+      setVoiceError("Voice input could not start in this browser. You can still type the complaint.");
+      return;
+    }
     setListening(true);
   }
 
@@ -162,6 +334,10 @@ export default function SubmitPage() {
       return;
     }
     setBusy(true);
+    // The location that will be submitted is final — stop the GPS hunt so no
+    // watcher (and no GPS/battery usage) survives past submission.
+    locWatcherRef.current?.clear();
+    locWatcherRef.current = null;
     try {
       const fd = new FormData();
       fd.set("description", description);
@@ -181,6 +357,9 @@ export default function SubmitPage() {
       if (devVision && demoHint) fd.set("demoHint", demoHint);
 
       const res = await api<SubmitResult>("/api/complaints", { formData: fd });
+      // The report is in — end any live dictation so the microphone does not
+      // stay hot on the receipt screen.
+      stopVoice();
       setResult(res.complaint);
       // Reveal the persisted agent decisions for this run.
       const detail = await api<{ complaint: { agentActivities: Activity[] } }>(
@@ -281,6 +460,7 @@ export default function SubmitPage() {
               </button>
             </div>
             {listening && <p className="flex items-center gap-2 text-sm text-rose-300"><span className="cs-pulse-dot h-2 w-2 rounded-full bg-rose-400" /> {t("listening")}</p>}
+            {voiceError && <p role="alert" className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">⚠ {voiceError}</p>}
             {!recAvailable && <p className="text-xs text-cs-secondary/70">Voice input needs a Chromium-based browser; you can still type the complaint.</p>}
           </Card>
 
@@ -326,8 +506,8 @@ export default function SubmitPage() {
           {/* Location */}
           <Card className="space-y-3 p-5">
             <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={locate} className="cs-btn cs-btn-secondary">
-                {locating ? <><Spinner /> Locating…</> : <>📍 {t("useLocation")}</>}
+              <button type="button" onClick={locate} className="cs-btn cs-btn-secondary" disabled={locPhase === "acquiring"}>
+                {locPhase === "acquiring" ? <><Spinner /> {t("locating")}</> : <>📍 {t("useLocation")}</>}
               </button>
               {geoKnown && (
                 <span className="font-mono text-xs text-cs-secondary">{lat!.toFixed(5)}, {lng!.toFixed(5)}</span>
@@ -341,8 +521,11 @@ export default function SubmitPage() {
                   ±{Math.round(accuracy)} m
                 </span>
               )}
-              {geoKnown && locSource === "GPS" && (
-                <span className="text-[11px] text-cs-secondary/70">from device GPS</span>
+              {geoKnown && locSource === "GPS" && locPhase === "acquiring" && (
+                <span className="text-[11px] text-cs-secondary/70">{t("locImproving")}</span>
+              )}
+              {geoKnown && locPhase === "confirmed" && (
+                <span className="text-[11px] text-emerald-300/90">✓ {t("locConfirmed")}</span>
               )}
             </div>
             {locError && (

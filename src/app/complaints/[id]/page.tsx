@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import {
   Card,
@@ -14,6 +15,7 @@ import {
   ErrorNote,
   EmptyState,
   SectionHeading,
+  Spinner,
 } from "@/components/ui";
 import MapPanel from "@/components/MapPanel";
 import { AgentActivityPanel, type Activity } from "@/components/AgentActivityPanel";
@@ -34,6 +36,7 @@ import {
   Mic,
   Route,
   ShieldCheck,
+  Trash2,
   User,
 } from "lucide-react";
 
@@ -49,6 +52,7 @@ type ComplaintDetail = {
   submittedAt: string | null; resolvedAt: string | null;
   slaState: "ON_TRACK" | "WARNING" | "BREACHED" | "ESCALATED" | "RESOLVED";
   activeAssignment: { id: string; status: string; mode: string } | null;
+  reporterId: string;
   reporter: { name: string }; assignedTo: { name: string } | null; department: { code: string; name: string } | null;
   events: Array<{ id: string; type: string; actor: string; title: string; detail: string | null; createdAt: string }>;
   agentActivities: Activity[];
@@ -107,7 +111,11 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
   const [me, setMe] = useState<SessionUser | null | undefined>(undefined);
   const [c, setC] = useState<ComplaintDetail | null>(null);
   const [error, setError] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const { t } = useLang();
+  const router = useRouter();
 
   useEffect(() => {
     fetchMe().then(setMe);
@@ -120,6 +128,37 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
 
   const notFound = /not found/i.test(error);
   const noAccess = /access/i.test(error);
+
+  // Citizen can withdraw their own report ONLY while it is still unassigned
+  // and untouched by worker processing (server enforces the same rule).
+  const canDelete =
+    me != null &&
+    c != null &&
+    me.id === c.reporterId &&
+    c.status === "RECEIVED" &&
+    c.activeAssignment == null &&
+    c.assignedTo == null;
+
+  async function deleteReport() {
+    if (!c || deleting) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await api(`/api/complaints/${id}`, { method: "DELETE" });
+      // Hand the success notice to the reports list (survives navigation).
+      try {
+        sessionStorage.setItem("cs_report_deleted", c.refCode);
+      } catch {
+        // Storage unavailable — navigation still works.
+      }
+      router.push("/citizen");
+    } catch (e) {
+      setDeleteError((e as Error).message || t("deleteFailed"));
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <AppShell>
@@ -169,6 +208,33 @@ export default function ComplaintDetailPage({ params }: { params: Promise<{ id: 
             <p className="mt-1.5 text-xs text-cs-secondary tnum">
               {t("reportedBy")} {c.reporter.name} · {fmtDateTime(c.createdAt)}
             </p>
+
+            {/* Citizen withdrawal — own report, still unassigned (B5). */}
+            {canDelete && (
+              <div className="mt-4">
+                {!confirmingDelete ? (
+                  <button type="button" onClick={() => setConfirmingDelete(true)} className="cs-btn cs-btn-secondary text-rose-300 hover:border-rose-400/40 hover:bg-rose-500/10">
+                    <Trash2 className="h-4 w-4" aria-hidden />
+                    {t("deleteReport")}
+                  </button>
+                ) : (
+                  <div role="alertdialog" aria-label={t("deleteReport")} className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-3.5">
+                    <p className="text-sm font-semibold text-rose-200">{t("deleteConfirmTitle")}</p>
+                    <p className="mt-1 text-xs text-rose-200/80">{t("deleteConfirmBody")}</p>
+                    {deleteError && <p className="mt-2 text-xs text-rose-300">{deleteError}</p>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" onClick={deleteReport} disabled={deleting} className="cs-btn bg-rose-500/80 text-white hover:bg-rose-500 disabled:opacity-50">
+                        {deleting ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-4 w-4" aria-hidden />}
+                        {deleting ? t("deleting") : t("deleteConfirmCta")}
+                      </button>
+                      <button type="button" onClick={() => setConfirmingDelete(false)} disabled={deleting} className="cs-btn cs-btn-secondary disabled:opacity-50">
+                        {t("cancel")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ── 7. SLA / status strip (real derived state from the API) ── */}
             {(() => {

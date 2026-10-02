@@ -103,6 +103,41 @@ export async function readImage(key: string): Promise<{ bytes: Buffer; mime: str
   }
 }
 
+/**
+ * Best-effort removal of a stored upload (report/resolution image). Used when
+ * a citizen deletes an unassigned complaint: evidence must not outlive the
+ * report it belongs to.
+ *
+ * DB rows are deleted directly; local-FS fallback files are unlinked with
+ * exists-check + try/catch because a missing file is an expected outcome,
+ * not an error. Failure NEVER blocks the complaint deletion — it is logged
+ * and left for housekeeping (an orphaned file has no FKs pointing at it).
+ */
+export async function deleteImage(key: string | null | undefined): Promise<boolean> {
+  if (!key) return false;
+  let deleted = false;
+  try {
+    const res = await prisma.storedFile.deleteMany({ where: { key } });
+    deleted = res.count > 0;
+  } catch {
+    // DB unavailable — fall through to the filesystem fallback.
+  }
+  try {
+    const { unlink, stat } = await import("fs/promises");
+    const filePath = path.join(process.cwd(), "storage", "uploads", key);
+    try {
+      await stat(filePath);
+      await unlink(filePath);
+      deleted = true;
+    } catch {
+      // File absent (or unwritable) — nothing to clean up locally.
+    }
+  } catch {
+    // fs unavailable (e.g. edge runtime) — best effort only.
+  }
+  return deleted;
+}
+
 export function publicUrlForKey(key: string | null | undefined): string | null {
   if (!key) return null;
   return `/api/files/${key}`;

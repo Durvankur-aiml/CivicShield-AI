@@ -20,7 +20,7 @@ const PIPELINE = [
  * explicit "live data unavailable" note, never as fake live numbers.
  * The probe is bounded so an unreachable DB cannot stall the page.
  */
-const DB_PROBE_MS = 800;
+const DB_PROBE_MS = 10000;
 
 function findRecentActivities() {
   return prisma.agentActivity.findMany({
@@ -45,7 +45,10 @@ async function landingStats() {
     const result = await Promise.race([query, timeout]);
     if (!result) throw new Error("database probe timed out");
     return { ...result, activities: result.activities, dbOk: true };
-  } catch {
+  } catch (e) {
+    // Surface the real failure (timeout vs Prisma error) — silently returning
+    // zeros made a live-data outage indistinguishable from an empty database.
+    console.error("LANDING STATS ERROR:", e);
     return { total: 0, resolved: 0, open: 0, activities: [] as Awaited<ReturnType<typeof findRecentActivities>>, dbOk: false };
   }
 }

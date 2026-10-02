@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, FolderOpen, LogOut, Plus, Radar, TrendingUp, Wrench, IdCard, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { Bell, FolderOpen, LogOut, Plus, Radar, TrendingUp, Wrench, IdCard, UserPlus, Users, ShieldCheck, type LucideIcon } from "lucide-react";
 import { fetchMe, api, type SessionUser } from "@/lib/client";
 import { LANGS, useLang } from "@/lib/i18n";
 import { Logo } from "./Logo";
@@ -17,6 +17,7 @@ const NAV: Record<SessionUser["role"], NavItem[]> = {
     { href: "/citizen/submit", label: "Report", icon: Plus },
     { href: "/citizen", label: "My Reports", icon: FolderOpen },
     { href: "/worker/apply", label: "Apply as worker", labelKey: "applyNav", icon: UserPlus },
+    { href: "/official/apply", label: "Apply as official", labelKey: "officialApplyNav", icon: ShieldCheck },
   ],
   OFFICIAL: [
     { href: "/official", label: "Command Center", icon: Radar },
@@ -26,6 +27,11 @@ const NAV: Record<SessionUser["role"], NavItem[]> = {
   WORKER: [
     { href: "/worker", label: "My Tasks", icon: Wrench },
     { href: "/worker/profile", label: "Profile", labelKey: "profileNav", icon: IdCard },
+    { href: "/official/apply", label: "Apply as official", labelKey: "officialApplyNav", icon: ShieldCheck },
+  ],
+  ADMIN: [
+    { href: "/admin", label: "Admin", labelKey: "adminNav", icon: ShieldCheck },
+    { href: "/admin/official-applications", label: "Official applications", labelKey: "adminApplicationsNav", icon: Users },
   ],
 };
 

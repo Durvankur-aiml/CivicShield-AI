@@ -18,7 +18,7 @@ import {
   Modal,
 } from "@/components/ui";
 import MapPanel from "@/components/MapPanel";
-import { api, fetchMe, fmtDateTime, fmtAgo, fmtCountdown, type SessionUser } from "@/lib/client";
+import { api, fetchMe, fmtDateTime, fmtAgo, fmtCountdown, homeForRole, type SessionUser } from "@/lib/client";
 import { useLang } from "@/lib/i18n";
 import {
   ArrowRight,
@@ -114,7 +114,7 @@ export default function WorkerPage() {
   useEffect(() => {
     fetchMe().then((u) => {
       if (!u) { setMe(null); return; }
-      if (u.role !== "WORKER") { window.location.href = u.role === "OFFICIAL" ? "/official" : "/citizen"; return; }
+      if (u.role !== "WORKER") { window.location.href = homeForRole(u.role); return; }
       setMe(u);
       load();
       api<{ unreadCount: number }>("/api/notifications?limit=1")

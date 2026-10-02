@@ -196,8 +196,15 @@ export function scoreCandidate(
   let distanceM: number | null = null;
   let distancePoints = SCORE_WEIGHTS.distance * 0.5;
   let distanceNote = "no worker location on file — neutral";
-  if (profile.baseLat != null && profile.baseLng != null && complaint.lat != null && complaint.lng != null) {
-    distanceM = Math.round(haversineMeters(profile.baseLat, profile.baseLng, complaint.lat, complaint.lng));
+  const coordsUsable =
+    hasUsableCoordinates(profile.baseLat, profile.baseLng) && hasUsableCoordinates(complaint.lat, complaint.lng);
+  if (coordsUsable) {
+    distanceM = Math.round(haversineMeters(
+      profile.baseLat as number,
+      profile.baseLng as number,
+      complaint.lat as number,
+      complaint.lng as number
+    ));
     distancePoints = SCORE_WEIGHTS.distance * Math.max(0, 1 - distanceM / MAX_DISTANCE_M);
     distanceNote = `${distanceM} m from complaint`;
   } else if (profile.baseLat != null && profile.baseLng != null) {
@@ -241,6 +248,23 @@ export function rankCandidates(a: ScoredCandidate, b: ScoredCandidate): number {
   const db = b.distanceM ?? Number.POSITIVE_INFINITY;
   if (da !== db) return da - db;
   return a.profile.employeeId.localeCompare(b.profile.employeeId);
+}
+
+/**
+ * True when a coordinate pair is usable for distance math: both finite
+ * numbers inside the valid geographic ranges (lat −90..90, lng −180..180).
+ * Submission validation (constants.ts) already enforces these bounds; this
+ * is defense-in-depth for data written before that validation existed.
+ */
+export function hasUsableCoordinates(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 && lat <= 90 &&
+    lng >= -180 && lng <= 180
+  );
 }
 
 // ── Candidate loading (avoid N+1: one query + one aggregate) ─────────────

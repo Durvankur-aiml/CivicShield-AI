@@ -46,13 +46,13 @@ export type OverviewAnalytics = {
 
 export async function overviewAnalytics(window: TimeWindow) {
   const [complaints, resolution, sla, assignments, verification, location, trends] = await Promise.all([
-    complaintVolume(window),
-    resolutionAnalytics(window),
-    slaAnalytics(window),
-    assignmentAnalytics(window),
-    verificationAnalytics(window),
-    locationAnalytics(window),
-    trendAnalytics(window),
+    withPoolRetry(() => complaintVolume(window)),
+    withPoolRetry(() => resolutionAnalytics(window)),
+    withPoolRetry(() => slaAnalytics(window)),
+    withPoolRetry(() => assignmentAnalytics(window)),
+    withPoolRetry(() => verificationAnalytics(window)),
+    withPoolRetry(() => locationAnalytics(window)),
+    withPoolRetry(() => trendAnalytics(window)),
   ]);
   return {
     envelope: envelope(window),
@@ -64,6 +64,44 @@ export async function overviewAnalytics(window: TimeWindow) {
     location,
     trends,
   };
+}
+
+// ── Transient connection-pooler resilience (overview burst) ─────────────
+// The overview endpoint runs SEVEN metric groups in parallel (~30 queries).
+// Against Supabase PgBouncer this can briefly exceed the server-side client
+// cap (observed: FATAL (EMAXCONNSESSION) … pool_size: 15), which surfaced to
+// the UI as an opaque "Internal server error". These failures are TRANSIENT
+// connection-scheduling issues, not data problems: a short bounded retry
+// turns them into a correct response. Anything else rethrows immediately —
+// no silent swallowing, no fabricated metrics (NO-SILENT-FAILURE rule).
+
+/** Prisma/Postgres error text that indicates a momentary pooler overload. */
+function isTransientPoolError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message ?? "";
+  if (/EMAXCONNSESSION|max clients reached|pool_size|Pool timeout|Connection terminated|too many connections/i.test(msg)) {
+    return true;
+  }
+  // Observed variant: PrismaClientUnknownRequestError with an EMPTY message
+  // carrying the pooler FATAL only in the connector log.
+  return err.name === "PrismaClientUnknownRequestError" && msg.length === 0;
+}
+
+const POOL_RETRY_DELAYS_MS = [150, 400, 900];
+
+/** Bounded retry wrapper for one metric group (rethrows non-transient immediately). */
+async function withPoolRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= POOL_RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, POOL_RETRY_DELAYS_MS[attempt - 1]));
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientPoolError(err)) throw err;
+    }
+  }
+  throw lastErr;
 }
 
 export {

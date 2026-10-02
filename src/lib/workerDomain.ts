@@ -1,7 +1,8 @@
 import { prisma } from "./db";
 import { ApiError, type SessionUser } from "./auth";
 import type { WorkerApplicationInput } from "./constants";
-import { APPLICATION_STATUS } from "./constants";
+import { APPLICATION_STATUS, departmentLabel } from "./constants";
+import { send } from "./notificationDomain";
 import type { WorkerApplication, WorkerProfile } from "@prisma/client";
 
 /**
@@ -106,6 +107,40 @@ function isP2002(err: unknown): boolean {
   return e?.code === "P2002" || /unique constraint|duplicate key/i.test(e?.message ?? "");
 }
 
+/**
+ * Best-effort notification — a notification failure must never fail the
+ * domain action that produced it (the application/approval is the source of
+ * truth; the notification is derived). Failures are logged and swallowed.
+ */
+async function notify(input: Parameters<typeof send>[1]): Promise<void> {
+  try {
+    await send(prisma, input);
+  } catch (err) {
+    console.error("[workerDomain] notification failed:", err);
+  }
+}
+
+/** Notify every admin that a worker application awaits official review. */
+async function notifyAdminsOfWorkerApplication(app: { id: string; applicant: { name: string } | null }, departmentCode: string) {
+  try {
+    const admins = await prisma.user.findMany({ where: { role: "ADMIN" }, select: { id: true } });
+    await Promise.all(
+      admins.map((a) =>
+        notify({
+          recipientId: a.id,
+          type: "WORKER_APPLICATION_SUBMITTED",
+          title: "New worker application",
+          body: `${app.applicant?.name ?? "An applicant"} applied for worker verification (${departmentLabel(departmentCode)}). Officials will review it.`,
+          dedupeKey: `worker-application:submitted:${app.id}:${a.id}`,
+          data: { applicationId: app.id },
+        })
+      )
+    );
+  } catch (err) {
+    console.error("[workerDomain] admin notification failed:", err);
+  }
+}
+
 const VAGUE_ID_CONFLICT = "This employee ID is already registered or under review.";
 
 /**
@@ -175,6 +210,9 @@ export async function submitWorkerApplication(
       },
       include: { department: deptCode, applicant: { select: { name: true } } },
     });
+
+    await notifyAdminsOfWorkerApplication(created, input.departmentCode);
+
     return toPublicApplication(created);
   } catch (err) {
     // Race: two applications claimed the same employeeId simultaneously.
@@ -260,6 +298,14 @@ export async function reviewWorkerApplication(
       departmentCode: app.department.code,
       reason: rejectionReason,
     });
+    await notify({
+      recipientId: app.applicantId,
+      type: "WORKER_APPLICATION_REJECTED",
+      title: "Worker application rejected",
+      body: rejectionReason ?? "Contact the reviewing official for details.",
+      dedupeKey: `worker-application:rejected:${app.id}`,
+      data: { applicationId: app.id },
+    });
     return { application: toPublicApplication(rejected) };
   }
 
@@ -297,6 +343,15 @@ export async function reviewWorkerApplication(
       employeeId: app.employeeId,
       departmentCode: app.department.code,
       approvedUserId: app.applicantId,
+    });
+
+    await notify({
+      recipientId: app.applicantId,
+      type: "WORKER_APPLICATION_APPROVED",
+      title: "Worker application approved",
+      body: `You are now a verified worker (CivicShield Worker ID ${result.profile.employeeId}). Your tasks dashboard is ready.`,
+      dedupeKey: `worker-application:approved:${app.id}`,
+      data: { applicationId: app.id, employeeId: result.profile.employeeId },
     });
 
     const approved = await prisma.workerProfile.findUnique({
